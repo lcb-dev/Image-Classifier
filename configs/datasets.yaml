@@ -1,9 +1,0 @@
-datasets:
-  - name: cifar100
-    type: cifar100
-    root: data
-    split: train
-  - name: food101
-    type: food101
-    root: data
-    split: train
