@@ -13,45 +13,84 @@
 - GPU Available:  True
 - GPU Device:  AMD Radeon Graphics
 
+## Project Structure
+Currently this project consists of essentially three layers:
+- Machine Learning parts
+      - Data
+      - Model
+      - Training
+- Performance Logging
+      - Collect
+      - Save
+- Visualisation
+      - Read logs
+      - Plot data
+      - Generate graphs
 
-## First test
-Will be using the CIFAR100 dataset. Using ToTensor(), the image is torch.FloatTensor [C, H, W]. 
-I will then index the data.
-Matplotlib will be used to visualize this data. (expects: [H, W, C]).
+### Machine Learning Section
+Train.py:
+ - Parse CLI args
+ - Builds everything (transforms, datasets, model, etc.)
+ - Runs training and validation, for N epochs.
+ - Saves the best model, and does a final evaluation
+ - Calls profiled wrappers so each epoch gets measured.
 
-## Performance monitoring and metrics
-I was interested to see how ROCm performed with the training data, so I setup a performance testing framework. 
-I wanted to log some different metrics:
-- GPU Usage (%)
-- GPU Power Usage (W)
-- Shader Clock (MHz)
-- GPU Temp (C)
-- PyTorch Memory Allocation metrics (MB)
-- VRAM Usage (MB)
+PyTorch GPU API:
+ - Despite using ROCm, the module is named "cuda", even on the ROCm builds.
+ - Checks "torch.cuda.is_available()" before attempting to execute on the GPU.
 
-To do this, I used a decorator "gpu_profile()" which ran some performance profiling code on a separate thread. 
-It timed the process duration, and the metrics gathered were split into two parts:
- - PyTorch Metrics:
-   - "torch_mem_alloc_mb"
-   - "torch_mem_reserved_mb"
-   - "torch_max_mem_alloc_mb"
- - GPU (ROCm) Metrics:
-   - Clocks, power usage, shader clock, etc.
+Data pipeline (train.py):
+ - Transforms: Normalization, makes training stable.
+ - Datasets: Download and expose images+labels.
+ - DataLoaders: Feeds tensors to the model
 
-The ROCm profiling part was done using "/opt/rocm/bin/rocm-smi", which is just a CLI tool to monitor and manage AMD GPUs using the ROCm stack.
+Model (src/model.py -> SmallCifarNet):
+ - A from-scratch CNN.
 
-This initial performance data was then output into ".jsonl" files:
- - train_epoch.jsonl
- - val_epoch.jsonl
+Training engine (src/engine.py):
+ - Loops over batches
+ - runs the model in inference mode, computes loss, top-1 and top-5 accuracy.
 
-### Visualising the data
-Next step was to visualise this data.
-So, I created a new utility script perf_viz.py. 
-This script used matplotlib, PIL, and pandas, to load process and then create a visual output of the data in the jsonl files.
+### Performance logging
+src/profiler.py:
+ - While a wrapped function runs, samples metrics periodically and writes JSON lines to a file.
+ - Metrics:
+       - ROCm-smi: Temperature, clocks, power, GPU Utilisation, VRAM usage
+       - PyTorch runtime: allocated/reserved/peak GPU memory.
+ - perf/train_epoch.jsonl (samples during training epochs)
+ - perf/val_epoch.jsonl (samples during evaluation)
 
-This creates a separate png file of a graph for each metric measured.
+Why "jsonl"?
+ - One JSON object per line, so easy to stream, filter, and read into pandas.
 
-One last improvement made here, was to create another quick CLI script to collate these images into a single png.
-See: /tools/montage_perf.py
+### Visualisation
+src/perf_viz.py:
+ - load jsonl: Read one or many JSONL logs into DataFrames, compute a relative time column, and tag each file as a run.
+ - plot core metrics: Create PNG time-series for present metrics. Skips any missing.
+ - Summary: Outputs a small per-run table.
+ - Montage creation: Stitch multiple PNGs into a single grid image.
 
-This then gave a clear view of metrics for the run.
+Some CLI tools:
+ - tools/plot_perf.py:
+       - writes metric PNGs + CSVs + optional summary to perf/plots_train/.
+       - Example command: "python -m tools.plot_perf perf/train_epoch.jsonl --out perf/plots_train"
+ - tools/montage_perf.py:
+       - Makes one combined image.
+       - Example command: "python -m tools.montage_perf perf/plots_train --cols 3 --out perf/plots_train/montage.png".
+   
+## How it flows end-to-end
+1. Start training:
+       - python train.py --epochs N --clear-perf
+       - Clears old logs
+       - Builds data/model/optim/scaler
+       - Best model saved to "models/..."
+2. Plot & Inspect:
+       - python -m tools.plot_perf perf/train_epoch.jsonl --out perf/plots_train
+3. Reporting
+       - Training prints epoch metrics
+       - Final evaluation prints top-1/top-5 and loss.
+
+## Cloning the repo
+```bash
+gh clone lcb-dev/Image-Classifier
+```
