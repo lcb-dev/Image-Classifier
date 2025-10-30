@@ -4,11 +4,13 @@ from torchvision import datasets
 from torch.utils.data import DataLoader
 from src import SmallCifarNet, evaluate, gpu_device
 
+MEAN=(0.5071,0.4865,0.4409); STD=(0.2673,0.2564,0.2762)
+
 def main():
     device = gpu_device()
     tfm = T.Compose(
         [T.ToTensor(), 
-        T.Normalize((0.5,)*3, (0.5,)*3)
+        T.Normalize(MEAN, STD)
         ])
 
     test_ds = datasets.CIFAR100(root="data", train=False, download=True, transform=tfm)

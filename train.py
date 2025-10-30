@@ -39,16 +39,39 @@ def clear_dir_safe(dir_path: str):
         elif child.is_dir():
             shutil.rmtree(child)
 
-def make_transforms():
-    return transforms.Compose([
+# def make_transforms():
+#     return transforms.Compose([
+#         transforms.ToTensor(),
+#         transforms.Normalize(MEAN, STD)  # OLD: (0.5,0.5,0.5), (0.5,0.5,0.5)
+#     ])
+
+# NEW test version
+def make_transforms(augment: bool):
+    tfm_train = transforms.Compose([
+        transforms.RandomCrop(32, padding=4),
+        transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
-        transforms.Normalize(MEAN, STD)  # OLD: (0.5,0.5,0.5), (0.5,0.5,0.5)
+        transforms.Normalize(MEAN, STD),
+    ]) if augment else transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize(MEAN, STD),
     ])
 
-def make_datasets(data_root, transform):
-    train_ds = datasets.CIFAR100(root=data_root, train=True,  download=True, transform=transform)
-    test_ds  = datasets.CIFAR100(root=data_root, train=False, download=True, transform=transform)
-    return train_ds, test_ds
+    tfm_val = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize(MEAN, STD),
+    ])
+    return tfm_train, tfm_val
+
+# def make_datasets(data_root, transform):
+#     train_ds = datasets.CIFAR100(root=data_root, train=True,  download=True, transform=transform)
+#     test_ds  = datasets.CIFAR100(root=data_root, train=False, download=True, transform=transform)
+#     return train_ds, test_ds
+
+def make_datasets(data_root, tfm_train, tfm_val):
+    train_ds = datasets.CIFAR100(root=data_root, train=True,  download=True, transform=tfm_train)
+    val_ds   = datasets.CIFAR100(root=data_root, train=False, download=True, transform=tfm_val)
+    return train_ds, val_ds
 
 def make_loaders(train_ds, val_ds, b_train, b_val, n_workers):
     train_loader = DataLoader(train_ds, batch_size=b_train, shuffle=True,
@@ -57,12 +80,22 @@ def make_loaders(train_ds, val_ds, b_train, b_val, n_workers):
                               num_workers=n_workers, pin_memory=True)
     return train_loader, val_loader
 
+# def make_model_and_opt(device, lr, wd):
+#     model = SmallCifarNet(num_classes=100).to(device)
+#     opt = optim.AdamW(model.parameters(), lr=lr, weight_decay=wd)
+#     use_amp = torch.cuda.is_available()
+#     scaler = torch.amp.GradScaler(device="cuda", enabled=use_amp)
+#     return model, opt, scaler
+
 def make_model_and_opt(device, lr, wd):
     model = SmallCifarNet(num_classes=100).to(device)
     opt = optim.AdamW(model.parameters(), lr=lr, weight_decay=wd)
     use_amp = torch.cuda.is_available()
-    scaler = torch.amp.GradScaler(device="cuda", enabled=use_amp)
+    scaler = torch.amp.GradScaler(device="cuda", enabled=use_amp)  # <- device_type
     return model, opt, scaler
+
+def make_scheduler(opt, epochs):
+    return torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=epochs)
 
 def make_profiled_fns(perf_dir):
     os.makedirs(perf_dir, exist_ok=True)
@@ -77,9 +110,26 @@ def make_profiled_fns(perf_dir):
 
     return profiled_train_epoch, profiled_evaluate
 
-def train(model, train_loader, val_loader, device, opt, scaler, epochs, models_dir, prof_tr, prof_ev):
+# def train(model, train_loader, val_loader, device, opt, scaler, epochs, models_dir, prof_tr, prof_ev):
+#     os.makedirs(models_dir, exist_ok=True)
+#     best = 0.0
+#     ckpt_path = os.path.join(models_dir, "smallcifarnet.pt")
+
+#     for epoch in range(epochs):
+#         tr = prof_tr(model, train_loader, opt, scaler, device)
+#         va = prof_ev(model, val_loader, device)
+#         print(f"e{epoch+1}: train {tr['loss']:.3f}/{tr['acc']:.3f} | "
+#               f"val {va['loss']:.3f} top1 {va['top1']:.3f} top5 {va['top5']:.3f}")
+#         if va["top1"] > best:
+#             best = va["top1"]
+#             torch.save(model.state_dict(), ckpt_path)
+
+#     return ckpt_path
+
+def train(model, train_loader, val_loader, device, opt, scaler, epochs, models_dir, prof_tr, prof_ev, scheduler, patience=7):
     os.makedirs(models_dir, exist_ok=True)
     best = 0.0
+    stale = 0
     ckpt_path = os.path.join(models_dir, "smallcifarnet.pt")
 
     for epoch in range(epochs):
@@ -87,9 +137,19 @@ def train(model, train_loader, val_loader, device, opt, scaler, epochs, models_d
         va = prof_ev(model, val_loader, device)
         print(f"e{epoch+1}: train {tr['loss']:.3f}/{tr['acc']:.3f} | "
               f"val {va['loss']:.3f} top1 {va['top1']:.3f} top5 {va['top5']:.3f}")
+
         if va["top1"] > best:
-            best = va["top1"]
+            best = va["top1"]; stale = 0
             torch.save(model.state_dict(), ckpt_path)
+        else:
+            stale += 1
+
+        if scheduler is not None:
+            scheduler.step()
+
+        if stale >= patience:
+            print(f"Early stopping at epoch {epoch+1} (no val improvement in {patience} epochs).")
+            break
 
     return ckpt_path
 
@@ -98,6 +158,29 @@ def final_eval(model, ckpt_path, val_loader, device):
     final = evaluate(model, val_loader, device)
     print(f"FINAL top1 {final['top1']:.3f}, top5 {final['top5']:.3f}, loss {final['loss']:.3f}")
     return final
+
+# def main():
+#     args = parse_args()
+
+#     if args.clear_perf:
+#         os.makedirs(args.perf_dir, exist_ok=True)
+#         clear_dir_safe(args.perf_dir)
+#         print(f"Cleared perf data in: {args.perf_dir}")
+
+#     device = gpu_device()
+#     if torch.cuda.is_available() and getattr(torch.version, "hip", None):
+#         print("Using AMD GPU via ROCm/HIP:", torch.cuda.get_device_name(0))
+
+#     tfm = make_transforms()
+#     train_ds, val_ds = make_datasets(args.data, tfm)
+#     train_loader, val_loader = make_loaders(train_ds, val_ds, args.batch_train, args.batch_val, args.num_workers)
+#     model, opt, scaler = make_model_and_opt(device, args.lr, args.wd)
+#     prof_tr, prof_ev = make_profiled_fns(args.perf_dir)
+
+#     ckpt = train(model, train_loader, val_loader, device, opt, scaler,
+#                  args.epochs, args.models_dir, prof_tr, prof_ev)
+
+#     final_eval(model, ckpt, val_loader, device)
 
 def main():
     args = parse_args()
@@ -111,14 +194,21 @@ def main():
     if torch.cuda.is_available() and getattr(torch.version, "hip", None):
         print("Using AMD GPU via ROCm/HIP:", torch.cuda.get_device_name(0))
 
-    tfm = make_transforms()
-    train_ds, val_ds = make_datasets(args.data, tfm)
-    train_loader, val_loader = make_loaders(train_ds, val_ds, args.batch_train, args.batch_val, args.num_workers)
+    tfm_train, tfm_val = make_transforms(augment=True) 
+    train_ds, val_ds = make_datasets(args.data, tfm_train, tfm_val)
+    train_loader, val_loader = make_loaders(
+        train_ds, val_ds, args.batch_train, args.batch_val, args.num_workers
+    )
+
     model, opt, scaler = make_model_and_opt(device, args.lr, args.wd)
+    scheduler = make_scheduler(opt, args.epochs)
     prof_tr, prof_ev = make_profiled_fns(args.perf_dir)
 
-    ckpt = train(model, train_loader, val_loader, device, opt, scaler,
-                 args.epochs, args.models_dir, prof_tr, prof_ev)
+    ckpt = train(
+        model, train_loader, val_loader, device, opt, scaler,
+        args.epochs, args.models_dir, prof_tr, prof_ev,
+        scheduler=scheduler, patience=7
+    )
 
     final_eval(model, ckpt, val_loader, device)
 
