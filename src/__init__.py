@@ -1,6 +1,15 @@
+
 from .model import SmallCifarNet
 from .engine import train_one_epoch, evaluate, topk_acc
 from .profiler import gpu_profile
+from .perf_viz import (
+    PerfData,
+    load_jsonl,
+    concat_runs,
+    save_csv,
+    plot_core_metrics,
+    summarize,
+)
 
 __all__ = [
     "SmallCifarNet",
@@ -9,6 +18,12 @@ __all__ = [
     "topk_acc",
     "gpu_profile",
     "gpu_device",
+    "PerfData",
+    "load_jsonl",
+    "concat_runs",
+    "save_csv",
+    "plot_core_metrics",
+    "summarize",
 ]
 
 import torch
@@ -24,4 +39,4 @@ def gpu_device():
         print("Using CPU")
     return dev
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

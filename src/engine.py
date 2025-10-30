@@ -7,11 +7,11 @@ def topk_acc(logits, y, k):
 def train_one_epoch(model, loader, optimizer, scaler, device):
     model.train()
     total_loss = 0.0; total_correct = 0; total = 0
-    amp = torch.cuda.is_available()
+    use_amp = torch.cuda.is_available()
     for x, y in loader:
         x, y = x.to(device, non_blocking=True), y.to(device, non_blocking=True)
         optimizer.zero_grad(set_to_none=True)
-        with torch.cuda.amp.autocast(enabled=amp):
+        with torch.amp.autocast(device_type="cuda", enabled=use_amp):
             logits = model(x)
             loss = F.cross_entropy(logits, y)
         scaler.scale(loss).backward()
