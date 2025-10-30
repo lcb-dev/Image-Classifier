@@ -210,3 +210,4 @@ __marimo__/
 
 # PyTorch training data
 data/
+perf/
