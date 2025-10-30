@@ -171,3 +171,92 @@ The best Top-1 value came at epoch 17.
 - Lowest val loss (epoch 10): 1.516
 
 Overall, not bad for a small model, but could certainly be improved.
+
+## Actually using the model on test images
+So, I made a simple predictor "predict.py", with the goal of trialing the model against some actual input data.
+I decided to run it against an image I found online of a wolf, to see if it could figure out what it was.
+
+### First test
+```
+python predict.py ./testimages/GW.jpg --topk 5
+```
+Sadly, my model wasn't super confident, but it wasn't too far off.
+Output:
+```
+1. leopard (56.9%)
+2. kangaroo (19.1%)
+3. camel (8.7%)
+4. wolf (6.5%)
+5. dinosaur (5.0%)
+```
+At the very least, wolf was in the top 5 guesses, and the top 5 guesses were all animals. 
+But there was clearly room for improvement.
+
+### Second test
+I tried adding TTA (Test-Time Augmentation)
+So that instead of predicting on the image once, it makes a few augmented versions (horizontal flipping, slight resize, etc.), and the model is then run on each. Then, the predictions are combined to (hopefully) give a more accurate prediction.
+
+In this example, I just added a simple horizontal flip.
+
+Then, to run:
+```
+python predict.py ./testimages/GW.jpg --topk 5 --tta
+```
+And the output improves!:
+```
+1. wolf (56.2%)
+2. leopard (27.1%)
+3. kangaroo (8.0%)
+4. dinosaur (4.6%)
+5. camel (1.6%)
+```
+Which was honestly way more than expected from just a single change!
+
+### Third test
+Made some pretty good improvements now to the predictor.
+Now, there are multiple modes for TTA: none, flip, 5crop, flip5crop, scale3.
+- none: Single forward pass with base transform. Fastest.
+- flip: Runs on the original image, and a horizontal flip, then average logits. Cheap accuracy improvement.
+- 5crop: First resizes slightly larger (36px), then takes 5 32x32 crops, centre + 4 corners. Averages logits across views. Useful when subject placement varies, more robust.
+- flip5crop: 5crop on the original, and the flopped image, for a total of 10 views. Most robust to framing and orientation, accuracy >> latency.
+- scale3: Three resized versions (28,32,36 px), centre crops to 32, averages logits. Adds scale jitter so small/large subjects don't throw off the model as much. Useful when object size varies, but more costly.
+
+With these new modes, I retested! (all with topk=3)
+
+#### tta=none
+```
+1. kangaroo (37.8%)
+2. wolf (24.0%)
+3. lobster (17.0%)
+```
+
+#### tta=flip
+```
+1. wolf (62.8%)
+2. kangaroo (13.5%)
+3. lobster (11.7%)
+```
+
+#### tta=5crop
+```
+1. wolf (73.8%)
+2. raccoon (4.9%)
+3. table (3.3%)
+```
+
+#### tta=flip5crop
+```
+1. wolf (85.4%)
+2. raccoon (7.6%)
+3. shark (1.0%)
+```
+
+#### tta=scale3
+```
+1. wolf (89.0%)
+2. lobster (3.1%)
+3. crab (2.9%)
+```
+
+From this, there was definitely some major improvements. Scale3 performed the best, with a certainty of 89%. 
+This, in addition to the other improvement changing the Normalize to the CIFAR100 stats, so far gave a very high accuracy.

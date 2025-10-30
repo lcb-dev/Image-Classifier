@@ -10,6 +10,9 @@ import torchvision.transforms as transforms
 
 from src import SmallCifarNet, train_one_epoch, evaluate, gpu_profile, gpu_device
 
+# CIFAR100 Normalization stats
+MEAN=(0.5071,0.4865,0.4409); STD=(0.2673,0.2564,0.2762)
+
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--data", type=str, default="data")
@@ -39,7 +42,7 @@ def clear_dir_safe(dir_path: str):
 def make_transforms():
     return transforms.Compose([
         transforms.ToTensor(),
-        transforms.Normalize((0.5,0.5,0.5), (0.5,0.5,0.5))
+        transforms.Normalize(MEAN, STD)  # OLD: (0.5,0.5,0.5), (0.5,0.5,0.5)
     ])
 
 def make_datasets(data_root, transform):
